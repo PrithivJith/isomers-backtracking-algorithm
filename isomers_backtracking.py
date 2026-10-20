@@ -1,149 +1,192 @@
-import itertools
-import random
-
-import networkx as nx
 import matplotlib.pyplot as plt
-from pprint import pprint
+import math as maths
+import copy
+import numpy
+from collections import deque
+import networkx as nx
+from networkx.algorithms import isomorphism
+import time
 
-#edge list plotting function
-def plot_graph(edge_list):
-    G = nx.MultiGraph()
-    G.add_edges_from(edge_list)
+VALENCES = {"C": 4, "O": 2, "N": 3, "H": 1, "P": 3}
 
-    pos = nx.spring_layout(G)
-    fig, ax = plt.subplots(figsize=(8, 6))
 
-    nx.draw_networkx_nodes(G, pos, node_color="lightblue", node_size=500)
-    nx.draw_networkx_labels(G, pos)
+class Molecule:
+    def __init__(self, atoms):
+        self.atoms = atoms
+        self.num_atoms = len(self.atoms)
+        self.max_valence = numpy.array([VALENCES[i] for i in self.atoms])
+        self.adj_matrix = numpy.zeros((self.num_atoms, self.num_atoms))
 
-    for edge in G.edges(data=True, keys=True):
-        u, v, key = edge[0], edge[1], edge[2]
+    def _valid_cell(self, i, j):
+        return i < j
 
-        ax.annotate(
-            "",
-            xy=pos[u],
-            xycoords="data",
-            xytext=pos[v],
-            textcoords="data",
-            arrowprops=dict(
-                arrowstyle="-",
-                color="black",
-                connectionstyle=f"arc3,rad={0.2 * key}",
-                shrinkA=10,
-                shrinkB=10,
-            ),
+    def set_bond(self, i, j, w=1):
+        if self._valid_cell(i, j):
+            self.adj_matrix[i, j] = w
+            self.adj_matrix[j, i] = w
+
+        else:
+            raise IndexError
+
+    def get_used_valence(self):
+        used_val = self.adj_matrix.sum(axis=1)
+        return used_val
+
+    def get_free_valences(self):
+        return self.max_valence - self.get_used_valence()
+
+    def get_free_valence_at(self, row):
+        return self.max_valence[row] - int(numpy.sum(self.adj_matrix[row, :]))
+
+    def is_valid(self):
+        return all(self.get_free_valences() >= 0)
+
+    def is_complete(self):
+        if self.is_valid():
+            return sum(self.get_free_valences()) == 0
+
+    def get_max_valence(self, r):
+        return VALENCES[self.atoms[r]]
+
+    def is_correct(self):
+        return self.is_connected() and self.is_complete()
+
+    def is_connected(self):
+        visited = set()
+        stack = deque()
+        visited.add(0)
+        stack.append(0)
+        while len(stack) > 0:
+            top = stack.pop()
+            # print(top)
+            for j in range(self.num_atoms):
+                cell = self.adj_matrix[top, j]
+                if j not in visited and cell > 0:
+                    visited.add(j)
+                    stack.append(j)
+        return len(visited) == self.num_atoms
+
+
+valid = []
+
+
+def build_compound(atoms: dict):
+    mol = []
+    for k, v in atoms.items():
+        for _ in range(v):
+            mol.append(k)
+    return mol
+
+
+def triangleArea(n):
+    return (n**2 - n) // 2
+
+
+def generateIsomers(mol):
+    results = []
+
+    def generateIsomerRec(mol: Molecule, i):
+
+        if not mol.is_valid():
+            return
+
+        if i == triangleArea(mol.num_atoms):
+            if mol.is_correct():
+                results.append(copy.deepcopy(mol))
+            return
+
+        row = None
+        for j in range(1, triangleArea(mol.num_atoms) + 1):
+            if i - (triangleArea(mol.num_atoms) - triangleArea(mol.num_atoms - j)) < 0:
+                row = j - 1
+                break
+        total_to_row = triangleArea(mol.num_atoms) - triangleArea(
+            mol.num_atoms - row - 1
         )
-    plt.show()
+        col = (mol.num_atoms) - (total_to_row - i)
 
-#builders graph with element property attached
-def build_graph(edges):
-    G = nx.MultiGraph()
-    G.add_edges_from(edges)
+        max_bond_check = min(mol.get_free_valence_at(row), mol.get_free_valence_at(col))
 
-    for node in G:
-        G.nodes[node]["element"] = node[0]
+        for v in range(0, max_bond_check + 1):
+            old = mol.adj_matrix[row, col]
+            mol.set_bond(row, col, v)
+            generateIsomerRec(mol, i + 1)
+            mol.set_bond(row, col, old)
+
+    generateIsomerRec(mol, 0)
+    return results
+
+
+def to_graph(mol: Molecule):
+    G = nx.from_numpy_array(mol.adj_matrix)
+    for i, atom in enumerate(mol.atoms):
+        G.nodes[i]["element"] = atom
     return G
 
-#checks if two graphs are isomorphs based on element property
-def are_isomorphic(edges1, edges2):
-    G1 = build_graph(edges1)
-    G2 = build_graph(edges2)
 
-    def match(n1, n2):
-        return n1["element"] == n2["element"]
-
-    return nx.is_isomorphic(G1, G2, node_match=match)
-
-#creates a compound with valences and frequency
-def build_compound(elements, valences):
-    compound_valence = {}
-    for el in elements.keys():
-        number = elements[el]
-        for i in range(1, number + 1):
-            compound_valence[f"{el}{i}"] = valences[el]
-    return compound_valence
-
-#check if every valence is 0 
-def balanced(valence):
-    return all([val == 0 for val in valence.values()])
+def is_mol_isomorphic(G1, G2):
+    node_match = isomorphism.categorical_node_match("element", None)
+    edge_match = isomorphism.categorical_edge_match("weight", 1)
+    return nx.is_isomorphic(G1, G2, node_match=node_match, edge_match=edge_match)
 
 
-valences = {"C": 4, "O": 2, "H": 1, "P": 3}
-compound = build_compound({"C": 2,"H":6,"O":1}, valences)
+def draw(G):
+    MG = nx.MultiGraph()
+    MG.add_nodes_from(G.nodes(data=True))
+
+    for u, v, data in G.edges(data=True):
+        for _ in range(int(data.get("weight", 1))):
+            MG.add_edge(u, v)
+
+    pos = nx.spring_layout(MG, seed=42)
+    labels = nx.get_node_attributes(MG, "element")
+
+    groups = {}
+    for u, v, key in MG.edges(keys=True):
+        pair = frozenset((u, v))
+        groups.setdefault(pair, []).append((u, v, key))
+
+    for edges in groups.values():
+        n = len(edges)
+        styles = [f"arc3,rad={(i - (n - 1) / 2) * 0.2}" for i in range(n)]
+
+        nx.draw_networkx_edges(
+            MG, pos, edgelist=edges, connectionstyle=styles, arrows=True, arrowstyle="-"
+        )
+
+    nx.draw_networkx_nodes(MG, pos, node_size=500)
+    nx.draw_networkx_labels(MG, pos, labels=labels, font_size=10, font_color="white")
+
+    plt.axis("off")
+    plt.show()
 
 
-def unique_isomers(
-    compound_valence, MAX_BONDS=3
-):  # takes elements + valences, and max bonds
-    combinations = list(
-        itertools.combinations(compound_valence.keys(), 2)
-    )  # make combinations of all possible bonds between elements
-    result = []  # results with isomorphic graphs (same shape)
-    u_result = []  # results without isomorphic graphs
-
-    def backtracking(
-        index, current_edges, current_valences
-    ):  # index represents which combination function is on
-
-        if index == len(
-            combinations
-        ):  # base case if you've finished all the combinations
-            G = nx.MultiGraph()
-            G.add_edges_from(current_edges)
-            components = nx.number_connected_components(G)
-            remaining_bonds = sum(current_valences.values()) // 2 
-
-            if remaining_bonds < components - 1: # checks if molecule is a disconnected graph, number of connections n-1, number of nodes should be n
-                print("disconnected")
-                return
-
-            if balanced(
-                current_valences
-            ):  # check if valences are = 0 
-                result.append(current_edges[:])  # add valid isomer to results
-            return  # end current function
-
-        u, v = combinations[index]  # two atoms (nodes) of the current combination
-        backtracking(
-            index + 1, current_edges, current_valences
-        )  # makes 0 bonds with the combination. This function will stack till you reach an empty []. Then you will backtrack.
-
-        max_bonds = min(
-            current_valences[u], current_valences[v], MAX_BONDS
-        )  # find max bonds by getting min valence of element: e.g. (C,H) max bond is min(4,1) = 1
-
-        for amount_b in range(
-            1, max_bonds + 1
-        ):  # make 1 ->  max_bonds with the combination. This function will stack and backtrack
-
-            current_valences[u] -= amount_b  # updates valences
-            current_valences[v] -= amount_b  # updates valences
-            current_edges.extend(
-                [(u, v)] * amount_b
-            )  # adds combination n number of times based on iteration of loop
-
-            backtracking(
-                index + 1, current_edges, current_valences
-            )  # checks next combination 
-            for _ in range(amount_b):  # undo's last move by removing edges (BACKTRACK)
-                current_edges.pop()
-            current_valences[u] += amount_b  # restores valence
-            current_valences[v] += amount_b  # restores valence
-
-    backtracking(0, [], compound_valence)  # Invokes helper function
-
-    for mol in result:  # creates new list with no graphical isomorphs
-        is_new = True
-        for umol in u_result:
-            if are_isomorphic(umol, mol):
-                is_new = False
-        if is_new:
-            u_result.append(mol)
-
-    pprint(u_result)
-    print(len(u_result))
-    return u_result
+def alkane(n):
+    return Molecule(build_compound({"C": n, "H": 2 * n + 2}))
 
 
-for mol in unique_isomers(compound):
-    plot_graph(mol)  # plots graph for each molecule
+def alkene(n):
+    return Molecule(build_compound({"C": n, "H": 2 * n}))
+
+
+start = time.time()
+test_comp = build_compound({"P": 4})
+
+valid = generateIsomers(alkene(3))
+end = time.time()
+print(end - start)
+
+unique_graphs = []
+
+for m in valid:
+    G = to_graph(m)
+    iso_flag = False
+    for g in unique_graphs:
+        if is_mol_isomorphic(g, G):
+            iso_flag = True
+            break
+    if not iso_flag:
+        unique_graphs.append(G)
+
+for g in unique_graphs:
+    draw(g)
