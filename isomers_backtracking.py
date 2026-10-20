@@ -82,10 +82,10 @@ def triangleArea(n):
     return (n**2 - n) // 2
 
 
-def generateIsomers(mol):
+def generateIsomers(mol, max_bond):
     results = []
 
-    def generateIsomerRec(mol: Molecule, i):
+    def generateIsomerRec(mol: Molecule, i, max_bond):
 
         if not mol.is_valid():
             return
@@ -105,15 +105,17 @@ def generateIsomers(mol):
         )
         col = (mol.num_atoms) - (total_to_row - i)
 
-        max_bond_check = min(mol.get_free_valence_at(row), mol.get_free_valence_at(col))
+        max_bond_check = min(
+            mol.get_free_valence_at(row), mol.get_free_valence_at(col), max_bond
+        )
 
         for v in range(0, max_bond_check + 1):
             old = mol.adj_matrix[row, col]
             mol.set_bond(row, col, v)
-            generateIsomerRec(mol, i + 1)
+            generateIsomerRec(mol, i + 1, max_bond)
             mol.set_bond(row, col, old)
 
-    generateIsomerRec(mol, 0)
+    generateIsomerRec(mol, 0, max_bond)
     return results
 
 
@@ -169,10 +171,10 @@ def alkene(n):
     return Molecule(build_compound({"C": n, "H": 2 * n}))
 
 
-start = time.time()
 test_comp = build_compound({"P": 4})
-
-valid = generateIsomers(alkene(3))
+mol = alkene(3)
+start = time.time()
+valid = generateIsomers(mol, 3)
 end = time.time()
 print(end - start)
 
